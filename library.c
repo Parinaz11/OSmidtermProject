@@ -8,7 +8,6 @@
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 int countFolders = 0;
-int somethingRandom;
 
 void* thread_function(void* arg) {
 
