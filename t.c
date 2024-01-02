@@ -138,3 +138,15 @@ int main() {
 
     return 0;
 }
+//output
+//Initial directory: /home/arabdi/Documents
+// Discovering and processing first-level directory: /home/arabdi/Documents/file two
+// Thread created for directory: /home/arabdi/Documents/file two
+// Discovering and processing first-level directory: /home/arabdi/Documents/file one
+// Thread created for directory: /home/arabdi/Documents/file one/file three
+// Thread created for directory: /home/arabdi/Documents/file one
+// chdir: No such file or directory
+// Thread created for directory: /home/arabdi/Documents/file one/file four
+// File type in directory /home/arabdi/Documents/file one/file four: Regular File
+// The total number of files in the parent process is 2.
+// The total number of files in the child process is 1.
