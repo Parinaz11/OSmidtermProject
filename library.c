@@ -9,15 +9,23 @@
 #include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <math.h>
 
 #define SHM_KEY 1234
 
 // Structure for shared memory
 struct SharedMemory {
     int totalFiles;
+    int fileTypeCount;
+    long maxFileSize;
+    char maxFilePath[200];
+    long minFileSize;
+    char minFilePath[200];
 };
 
 pthread_mutex_t mutex_totalFiles = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_maxFileSize = PTHREAD_MUTEX_INITIALIZER;
+
 int shmid;
 
 void* count_files(void* arg);
@@ -53,7 +61,19 @@ void* count_files(void* arg) {
 
         if (S_ISREG(file_stat.st_mode)) {
             pthread_mutex_lock(&mutex_totalFiles);
+            pthread_mutex_lock(&mutex_maxFileSize);
+
             sharedMemory->totalFiles++;
+            if (file_stat.st_size > sharedMemory->maxFileSize) {
+                sharedMemory->maxFileSize = file_stat.st_size;
+                strcpy(sharedMemory->maxFilePath, full_path);
+            }
+            else if (file_stat.st_size < sharedMemory->minFileSize) {
+                sharedMemory->minFileSize = file_stat.st_size;
+                strcpy(sharedMemory->minFilePath, full_path);
+            }
+
+            pthread_mutex_unlock(&mutex_maxFileSize);
             pthread_mutex_unlock(&mutex_totalFiles);
         } else if (S_ISDIR(file_stat.st_mode) && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
             // Create a thread for each subdirectory
@@ -121,6 +141,8 @@ void process_subdirectories(const char* main_directory, int shmid) {
                 int status;
                 waitpid(pid, &status, 0);
 
+
+
                  // Detach the shared memory segment
                  shmdt(sharedMemory);
             }
@@ -151,6 +173,10 @@ int main() {
     }
     // Initialize the shared variable
     sharedMemory->totalFiles = 0;
+    sharedMemory->maxFileSize = 0;
+    strcpy(sharedMemory->maxFilePath, "EMPTY_max");
+    sharedMemory->minFileSize = INFINITY;
+    strcpy(sharedMemory->minFilePath, "EMPTY_min");
 
     // Creates thread for the main directory
 //    pthread_t tid;
@@ -160,6 +186,10 @@ int main() {
     process_subdirectories(main_directory, shmid);
 
     printf("The total number of files in the main directory and its subdirectories is: %d\n", sharedMemory->totalFiles);
+    printf("Maximum file size: %ld bytes.\n", sharedMemory->maxFileSize);
+    printf("Maximum file path: %s\n", sharedMemory->maxFilePath);
+    printf("Minimum file size: %ld bytes.\n", sharedMemory->minFileSize);
+    printf("Minimum file path: %s\n", sharedMemory->minFilePath);
 
     // Detach the shared memory segment
     shmdt(sharedMemory);
