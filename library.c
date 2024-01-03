@@ -1,94 +1,89 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <dirent.h>
 #include <pthread.h>
 #include <sys/stat.h>
 #include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
 
-pthread_mutex_t mutex_totalFilesChild = PTHREAD_MUTEX_INITIALIZER;
+#define SHM_KEY 1234
 
-int totalFiles = 0;
-pthread_t thread_ids[100];
-int thread_count = 0;
+// Structure for shared memory
+struct SharedMemory {
+    int totalFiles;
+};
 
-void* process_directory(void* arg);
+pthread_mutex_t mutex_totalFiles = PTHREAD_MUTEX_INITIALIZER;
+int shmid;
 
-void* process_directory(void* arg) {
-    const char* directory = (const char*)arg;
+void* count_files(void* arg);
 
-    printf("Thread created for directory: %s\n", directory);
+void* count_files(void* arg) {
 
-    if (chdir(directory) == -1) {
-        perror("chdir");
-        pthread_exit(NULL);
+    struct SharedMemory* sharedMemory = (struct SharedMemory*)shmat(shmid, NULL, 0);
+    if ((int)sharedMemory == -1) {
+        perror("shmat in child");
+        exit(EXIT_FAILURE);
     }
+
+    const char* directory = (const char*)arg;
 
     DIR* dir;
     struct dirent* entry;
     struct stat file_stat;
 
-    dir = opendir(".");
+    dir = opendir(directory);
     if (dir == NULL) {
         perror("opendir");
         pthread_exit(NULL);
     }
 
     while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type != DT_DIR) {
-            char full_path[200];
-            snprintf(full_path, sizeof(full_path), "%s/%s", directory, entry->d_name);
+        char full_path[PATH_MAX];
+        snprintf(full_path, sizeof(full_path), "%s/%s", directory, entry->d_name);
 
-            if (stat(full_path, &file_stat) == -1) {
-                perror("stat");
-                continue;
-            }
-
-            printf("File type in directory %s: %s\n", directory,
-                   (S_ISREG(file_stat.st_mode) ? "Regular File" :
-                    (S_ISDIR(file_stat.st_mode) ? "Directory" :
-                     (S_ISLNK(file_stat.st_mode) ? "Symbolic Link" : "Other"))));
-
-            // Increment totalFilesChild inside the critical section
-            pthread_mutex_lock(&mutex_totalFilesChild);
-            totalFiles++;
-            pthread_mutex_unlock(&mutex_totalFilesChild);
+        if (stat(full_path, &file_stat) == -1) {
+            perror("stat");
+            continue;
         }
-        else if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
-            // Create a thread for each subdirectory in this process
 
-            char sub_path[200];
-            snprintf(sub_path, sizeof(sub_path), "%s/%s", directory, entry->d_name);
-            if (pthread_create(&thread_ids[thread_count++], NULL, process_directory, (void*)sub_path) != 0) {
-                perror("pthread_create");
-                exit(EXIT_FAILURE);
-            }
+        if (S_ISREG(file_stat.st_mode)) {
+            pthread_mutex_lock(&mutex_totalFiles);
+            sharedMemory->totalFiles++;
+            pthread_mutex_unlock(&mutex_totalFiles);
+        } else if (S_ISDIR(file_stat.st_mode) && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
+            // Create a thread for each subdirectory
+            pthread_t tid;
+            pthread_create(&tid, NULL, count_files, (void*)full_path);
+            pthread_join(tid, NULL);
         }
     }
 
     closedir(dir);
-
+    // Detach the shared memory segment
+    shmdt(sharedMemory);
     pthread_exit(NULL);
 }
 
-void discover_and_process_directories(const char* initial_directory) {
+
+void process_subdirectories(const char* main_directory, int shmid) {
     DIR* dir;
     struct dirent* entry;
 
-    dir = opendir(initial_directory);
+    dir = opendir(main_directory);
     if (dir == NULL) {
         perror("opendir");
         exit(EXIT_FAILURE);
     }
 
-    int status;
 
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_type == DT_DIR && entry->d_name[0] != '.') {
-
-            // Create a process for each of these directories
+            // Create a child process for each first-level subdirectory
             pid_t pid = fork();
 
             if (pid < 0) {
@@ -96,55 +91,81 @@ void discover_and_process_directories(const char* initial_directory) {
                 exit(EXIT_FAILURE);
             } else if (pid == 0) {
                 // Child process
-                char full_path[200];
-                snprintf(full_path, sizeof(full_path), "%s/%s", initial_directory, entry->d_name);
-                printf("Discovering and processing first-level directory: %s\n", full_path);
-                // Creating threads for directories in the second level
-                pthread_create(&thread_ids[thread_count++], NULL, process_directory, (void*)full_path);
+
+                struct SharedMemory* sharedMemory = (struct SharedMemory*)shmat(shmid, NULL, 0);
+                if ((int)sharedMemory == -1) {
+                    perror("shmat in child");
+                    exit(EXIT_FAILURE);
+                }
+
+                char full_path[PATH_MAX];
+                snprintf(full_path, sizeof(full_path), "%s/%s", main_directory, entry->d_name);
+                printf("Processing subdirectory: %s\n", full_path);
+                pthread_t tid;
+                pthread_create(&tid, NULL, count_files, (void*)full_path);
+                pthread_join(tid, NULL);
+
+
+                // Detach the shared memory segment
+                shmdt(sharedMemory);
+
                 exit(EXIT_SUCCESS);
-            } else{
-                int status2;
+            } else {
+                //Shared memory in the main directory (parent process)
+                struct SharedMemory* sharedMemory = (struct SharedMemory*)shmat(shmid, NULL, 0);
+                if ((int)sharedMemory == -1) {
+                    perror("shmat in parent");
+                    exit(EXIT_FAILURE);
+                }
+                // Parent process continues here
+                int status;
                 waitpid(pid, &status, 0);
+
+                 // Detach the shared memory segment
+                 shmdt(sharedMemory);
             }
-        }
-        else if (entry->d_type == DT_REG){
-            pthread_mutex_lock(&mutex_totalFilesChild);
-            char full_path[200];
-            snprintf(full_path, sizeof(full_path), "%s/%s", initial_directory, entry->d_name);
-            totalFiles++;
-            printf("Discovering first-level file: %s\n", full_path);
-            pthread_mutex_unlock(&mutex_totalFilesChild);
         }
     }
 
     closedir(dir);
-
-    // Wait for all child processes to finish
-    while (wait(&status) > 0);
-
-    // Wait for all the created threads to finish
-    for (int i = 0; i < thread_count; i++) {
-        pthread_join(thread_ids[i], NULL);
-    }
 }
 
 int main() {
-    // Initial directory
-    const char* start_directory = "/home/parinaz/Documents";
 
-    if (chdir(start_directory) == -1) {
-        perror("chdir");
+    const char* main_directory = "/home/parinaz/Documents";
+
+    key_t key = ftok("shmfile", SHM_KEY);
+    // Create a shared memory segment
+    shmid = shmget(key, sizeof(struct SharedMemory), IPC_CREAT | 0666);
+    if (shmid == -1) {
+        perror("shmget");
         exit(EXIT_FAILURE);
     }
-    printf("Initial directory: %s\n", start_directory);
 
-    // Discovering and processing first-level directories
-    discover_and_process_directories(start_directory);
+    // Attach the shared memory segment to the address space
+    struct SharedMemory* sharedMemory = (struct SharedMemory*)shmat(shmid, NULL, 0);
 
-    // Print the total number of files in the parent process
+    if ((int)sharedMemory == -1) {
+        perror("shmat");
+        exit(EXIT_FAILURE);
+    }
+    // Initialize the shared variable
+    sharedMemory->totalFiles = 0;
 
-    // Print the total number of files in the child process
-    printf("The total number of files in the child process is %d.\n", totalFiles);
+    // Creates thread for the main directory
+//    pthread_t tid;
+//    pthread_create(&tid, NULL, count_files, (void*)main_directory);
+//    pthread_join(tid, NULL);
+
+    process_subdirectories(main_directory, shmid);
+
+    printf("The total number of files in the main directory and its subdirectories is: %d\n", sharedMemory->totalFiles);
+
+    // Detach the shared memory segment
+    shmdt(sharedMemory);
+
+    // Remove the shared memory segment
+    shmctl(shmid, IPC_RMID, NULL);
 
     return 0;
 }
