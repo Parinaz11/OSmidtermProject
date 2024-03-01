@@ -1,13 +1,3 @@
-OSproject
-این برنامه برای اسکن بازگشتی یک دایرکتوری مشخص و زیرشاخه های آن برای شمارش تعداد کل فایل ها، تجزیه و تحلیل اندازه فایل ها و دسته بندی فایل ها بر اساس پسوند آنها طراحی شده است. برای پردازش کارآمد از حافظه چند رشته ای و مشترک استفاده می کند.
-این برنامه از یک ساختار حافظه مشترک (struct SharedMemory) برای ذخیره اطلاعات در سراسر رشته ها استفاده می کند. این شامل فیلدهایی برای کل فایل ها، تعداد نوع فایل، حداکثر و حداقل اندازه فایل، مسیرهای فایل و آرایه ای برای ذخیره انواع فایل است.
-این برنامه از multithreading برای پردازش همزمان زیر شاخه ها استفاده می کند و کارایی را بهبود می بخشد. آنها برای هر زیر شاخه ایجاد می شوند و نتایج برای تولید خروجی نهایی ترکیب می شوند.
-حافظه مشترک برای برقراری ارتباط بین رشته ها و فرآیندها استفاده می شود. متغیر shmid نشان دهنده بخش حافظه مشترک است و از توابع shmat و shmdt برای اتصال و جدا کردن حافظه مشترک استفاده می شود.
-خواص
-1- تعداد کل فایل های دایرکتوری اصلی و زیر شاخه های آن را می شمارد.
-2-  حداکثر و حداقل اندازه فایل را به همراه مسیرهای فایل مربوطه آنها شناسایی می کند.
-3-  فایل ها را بر اساس پسوند آنها دسته بندی می کند و تعداد دفعات هر نوع فایل را شمارش می کند.
+# Operating System Midterm Project
+Using C language and ptheads library, we created a program in which by taking a directory path, it first creates processes for the first level subdirectories and then creates threads for the other subdirectories inside them. Using multi-threading, we improved the performance of our program. These threads and processes count the number of files existing, identify the name and path for the smallest and largest file along with the how many files do we have of the same type (pdf, txt, pptx, etc) and also uses synchronization and shared memory methods.
 
-
-     پریناز عاکف (شناسه دانشجویی: 4002262224)
-     عارفه عبدی (شناسه دانشجویی: 4001262886)
